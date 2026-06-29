@@ -668,7 +668,7 @@ class MainWindow(QWidget):
         super().closeEvent(event)
 
 
-if __name__ == "__main__":
+def run():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     palette = QPalette()
@@ -679,3 +679,7 @@ if __name__ == "__main__":
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    run()
