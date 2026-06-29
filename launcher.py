@@ -62,8 +62,8 @@ def fetch(url: str, retries: int = 3) -> bytes:
 
 def raw_url(filename: str) -> str:
     return (
-        f"https://raw.githubusercontent.com/"
-        f"{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}/"
+        f"https://github.com/"
+        f"{GITHUB_USER}/{GITHUB_REPO}/raw/{GITHUB_BRANCH}/"
         f"{urllib.parse.quote(filename)}"
     )
 

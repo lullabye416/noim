@@ -1,4 +1,4 @@
 {
-  "version": "1.0.1",
-  "changelog": "자동 업데이트 테스트"
+  "version": "1.0.2",
+  "changelog": "input/output/sample 폴더 구조, 다운로드 경로 안정화"
 }
