@@ -10,10 +10,20 @@ from work_status import fill_work_status
 
 
 def _app_dir() -> str:
-    """exe(frozen) 또는 스크립트 실행 모두에서 올바른 저장 폴더를 반환."""
+    """작업 기준 폴더. 런처가 심어준 NOIM_BASE_DIR 우선."""
+    env = os.environ.get("NOIM_BASE_DIR")
+    if env:
+        return env
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
+
+
+def _sub_dir(name: str) -> str:
+    """input/output/sample 하위 폴더 경로 반환 (없으면 생성)."""
+    path = os.path.join(_app_dir(), name)
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 # ── 고정 매핑 상수 (회사 프로그램 출력 형식 기준) ────────────────
@@ -163,7 +173,7 @@ class Tab1Widget(QWidget):
     # ── 파일 로드 ─────────────────────────────────────────────────
 
     def select_excel_file(self):
-        fname, _ = QFileDialog.getOpenFileName(self, "파일 선택", "", "Excel (*.xlsx *.xlsm *.xls)")
+        fname, _ = QFileDialog.getOpenFileName(self, "파일 선택", _sub_dir("input"), "Excel (*.xlsx *.xlsm *.xls)")
         if not fname:
             return
 
@@ -227,7 +237,7 @@ class Tab1Widget(QWidget):
             QMessageBox.critical(self, "오류", str(e))
 
     def _load_sample(self):
-        fname, _ = QFileDialog.getOpenFileName(self, "샘플 파일 선택", "", "Excel (*.xlsx)")
+        fname, _ = QFileDialog.getOpenFileName(self, "샘플 파일 선택", _sub_dir("sample"), "Excel (*.xlsx)")
         if not fname:
             return
         self.sample_file = fname
@@ -294,7 +304,7 @@ class Tab1Widget(QWidget):
             "input_file":     self.input_file,
             "input_sheet":    self.sheet_combo.currentText(),
             "header_row":     COL_START_ROW,
-            "output_file":    os.path.join(_app_dir(), f"{self.edit_site.text()}_직영일일출력일보_{str(self.spin_year.value())[2:]}.{self.spin_month.value():02d}.xlsx"),
+            "output_file":    os.path.join(_sub_dir("output"), f"{self.edit_site.text()}_직영일일출력일보_{str(self.spin_year.value())[2:]}.{self.spin_month.value():02d}.xlsx"),
             "year":           self.spin_year.value(),
             "month":          self.spin_month.value(),
             "site_name":      self.edit_site.text(),
@@ -469,7 +479,7 @@ class Tab2Widget(QWidget):
     # ── 노임일보 로드 ─────────────────────────────────────────────
 
     def _load_noim(self):
-        fname, _ = QFileDialog.getOpenFileName(self, "노임일보 파일 선택", "", "Excel (*.xlsx)")
+        fname, _ = QFileDialog.getOpenFileName(self, "노임일보 파일 선택", _sub_dir("output"), "Excel (*.xlsx)")
         if not fname:
             return
         self.noim_file = fname
@@ -481,7 +491,7 @@ class Tab2Widget(QWidget):
     # ── 원본 파일 로드 ────────────────────────────────────────────
 
     def _load_target(self):
-        fname, _ = QFileDialog.getOpenFileName(self, "원본 파일 선택", "", "Excel (*.xlsx *.xlsm *.xls)")
+        fname, _ = QFileDialog.getOpenFileName(self, "원본 파일 선택", _sub_dir("sample"), "Excel (*.xlsx *.xlsm *.xls)")
         if not fname:
             return
 
@@ -545,9 +555,7 @@ class Tab2Widget(QWidget):
         year  = self.spin2_year.value()
         month = self.spin2_month.value()
 
-        base_dir    = _app_dir()
-        output_dir  = os.path.join(base_dir)
-        os.makedirs(output_dir, exist_ok=True)
+        output_dir  = _sub_dir("output")
         output_name = f"작업현황_{year}년_{month:02d}월.xlsx"
         output_path = os.path.join(output_dir, output_name)
 

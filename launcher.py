@@ -152,6 +152,14 @@ def main():
     # gui.py가 샘플 파일을 찾을 수 있도록 작업 디렉터리도 이동
     os.chdir(str(SCRIPTS_DIR))
 
+    # exe(런처)가 설치된 폴더를 작업 폴더로 알려줌 → input/output/sample 위치 기준
+    if getattr(sys, 'frozen', False):
+        base_dir = Path(sys.executable).parent       # C:\노임일보\
+    else:
+        base_dir = Path(__file__).parent             # 개발 시: 프로젝트 폴더
+    os.environ["NOIM_BASE_DIR"] = str(base_dir)
+    log(f"작업 폴더: {base_dir}")
+
     log("gui 실행")
     import gui          # exe에 내장된 gui.py
     gui.run()           # ↓ gui.py에 run() 추가 예정
