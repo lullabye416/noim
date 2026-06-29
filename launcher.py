@@ -44,10 +44,20 @@ def log(msg: str):
     print(msg)
 
 
-def fetch(url: str) -> bytes:
-    req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return r.read()
+def fetch(url: str, retries: int = 3) -> bytes:
+    import time
+    last_err = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "noim-launcher"}
+            )
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.read()
+        except Exception as e:
+            last_err = e
+            time.sleep(1.5 * (attempt + 1))   # 점점 길게 대기 후 재시도
+    raise last_err
 
 
 def raw_url(filename: str) -> str:
@@ -112,18 +122,19 @@ def update_logic():
         if is_first or version_newer(remote_ver, local_ver):
             log(f"업데이트: {local_ver} → {remote_ver}")
             download_all()
+            # 다운로드 성공 후 버전 기록
             VERSION_FILE.write_text(
                 json.dumps({"version": remote_ver, "changelog": changelog},
                            ensure_ascii=False, indent=2),
                 encoding="utf-8"
             )
+            log(f"버전 기록 완료: {remote_ver}")
         else:
             log("최신 버전입니다.")
 
     except Exception as e:
         log(f"업데이트 건너뜀 (오프라인?): {e}")
         if is_first:
-            # 첫 실행인데 다운로드 실패 → 실행 불가
             raise RuntimeError(
                 "최초 실행에는 인터넷 연결이 필요합니다.\n"
                 "인터넷 연결 후 다시 실행해 주세요."
