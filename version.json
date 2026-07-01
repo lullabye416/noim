@@ -1,4 +1,5 @@
 {
-  "version": "1.0.2",
-  "changelog": "input/output/sample 폴더 구조, 다운로드 경로 안정화"
+  "version": "1.1.0",
+  "changelog": "표준 로깅 도입(정규화+일자 롤링), Sentry 원격 에러 수집, 실패 원인 로깅, 예외 훅",
+  "sentry_dsn": ""
 }

@@ -2,6 +2,13 @@ import pandas as pd
 from typing import Dict, Callable, Optional
 from excel_template import ExcelTemplate
 
+try:
+    from app_logging import get_logger
+    _log = get_logger("labor")
+except Exception:
+    import logging
+    _log = logging.getLogger("labor")
+
 
 # ── 데이터 계산 ───────────────────────────────────────────────────
 
@@ -98,6 +105,12 @@ def run_migration(settings: Dict, base_file: str, progress_callback: Callable = 
 
     template = ExcelTemplate(base_file)
     output_file = template.write_output(day_data, settings)
+
+    _log.info("노임일보 생성 완료 | 근로자=%d명 | 작업일=%d일 | 시트=%s | 월=%s-%02d",
+              len(workers), len(day_data), settings.get('input_sheet'),
+              settings.get('year'), settings.get('month'))
+    if not day_data:
+        _log.warning("작업일이 0일입니다 — 입력 시트의 출근 데이터가 비었거나 열 매핑이 어긋났을 수 있습니다.")
 
     # ── 작업 결과 요약 ─────────────────────────────────────────────
     workers_detail = []

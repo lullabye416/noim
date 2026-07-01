@@ -1,12 +1,34 @@
 import sys, os, datetime
 import pandas as pd
-import win32com.client as win32
-import pythoncom
+try:
+    import win32com.client as win32
+    import pythoncom
+    _HAS_WIN32 = True
+except Exception:
+    win32 = None
+    pythoncom = None
+    _HAS_WIN32 = False
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPalette, QFont
 from labor import run_migration
 from work_status import fill_work_status
+
+# ── 표준 로거 ─────────────────────────────────────────────────────
+# 런처가 setup_logging을 이미 호출했으면 그 설정을 재사용,
+# 단독 실행(개발) 시에는 get_logger가 자동 기본 설정한다.
+try:
+    from app_logging import get_logger, capture_exception, setup_logging, install_excepthook
+except Exception:
+    # app_logging이 없을 때도 최소 동작하도록 폴백
+    import logging as _logging
+    def get_logger(name="gui"): return _logging.getLogger(name)
+    def capture_exception(exc=None, **ctx):
+        _logging.getLogger("gui").error("예외 %s", ctx, exc_info=exc or True)
+    def setup_logging(*a, **k): pass
+    def install_excepthook(): pass
+
+_flog = get_logger("gui")
 
 
 def _app_dir() -> str:
@@ -182,26 +204,18 @@ class Tab1Widget(QWidget):
         if fname.lower().endswith('.xls'):
             self.log("구버전(.xls) 감지 → 변환 중...")
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            excel = wb = None
             try:
-                pythoncom.CoInitialize()
-                excel = win32.gencache.EnsureDispatch('Excel.Application')
-                excel.Visible = False; excel.DisplayAlerts = False
-                abs_in  = os.path.abspath(fname)
-                abs_out = os.path.splitext(abs_in)[0] + "_conv.xlsx"
-                wb = excel.Workbooks.Open(abs_in)
-                wb.SaveAs(abs_out, FileFormat=51)
-                target_fname = abs_out
+                from xls_convert import convert_xls_to_xlsx
+                target_fname = convert_xls_to_xlsx(fname)
                 if target_fname not in self.temp_files:
                     self.temp_files.append(target_fname)
-                self.log(f"✅ 변환 완료 → {os.path.basename(abs_out)}")
+                self.log(f"✅ 변환 완료 → {os.path.basename(target_fname)}")
             except Exception as e:
+                capture_exception(e, tab="tab1", step="xls_convert",
+                                  file=os.path.basename(fname))
                 QMessageBox.critical(self, "변환 실패", str(e))
                 return
             finally:
-                if wb:    wb.Close(SaveChanges=False)
-                if excel: excel.Quit()
-                pythoncom.CoUninitialize()
                 QApplication.restoreOverrideCursor()
 
         try:
@@ -328,6 +342,9 @@ class Tab1Widget(QWidget):
             self.log(f"✅ 완료 → {settings['output_file']}")
             QMessageBox.information(self, "완료", f"노임일보가 생성되었습니다.\n\n파일명: [{settings['output_file']}]")
         except Exception as e:
+            capture_exception(e, tab="tab1", step="run_migration",
+                              sheet=settings.get('input_sheet'),
+                              year=settings.get('year'), month=settings.get('month'))
             self.log(f"❌ 오류: {e}")
             QMessageBox.critical(self, "에러", str(e))
         finally:
@@ -499,26 +516,18 @@ class Tab2Widget(QWidget):
         if fname.lower().endswith('.xls'):
             self.log("[탭2] 구버전(.xls) 감지 → 변환 중...")
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            excel = wb = None
             try:
-                pythoncom.CoInitialize()
-                excel = win32.gencache.EnsureDispatch('Excel.Application')
-                excel.Visible = False; excel.DisplayAlerts = False
-                abs_in  = os.path.abspath(fname)
-                abs_out = os.path.splitext(abs_in)[0] + "_conv.xlsx"
-                wb = excel.Workbooks.Open(abs_in)
-                wb.SaveAs(abs_out, FileFormat=51)
-                target = abs_out
-                if abs_out not in self.temp_files:
-                    self.temp_files.append(abs_out)
-                self.log(f"[탭2] 변환 완료 → {os.path.basename(abs_out)}")
+                from xls_convert import convert_xls_to_xlsx
+                target = convert_xls_to_xlsx(fname)
+                if target not in self.temp_files:
+                    self.temp_files.append(target)
+                self.log(f"[탭2] 변환 완료 → {os.path.basename(target)}")
             except Exception as e:
+                capture_exception(e, tab="tab2", step="xls_convert",
+                                  file=os.path.basename(fname))
                 QMessageBox.critical(self, "변환 실패", str(e))
                 return
             finally:
-                if wb:    wb.Close(SaveChanges=False)
-                if excel: excel.Quit()
-                pythoncom.CoUninitialize()
                 QApplication.restoreOverrideCursor()
 
         try:
@@ -576,6 +585,8 @@ class Tab2Widget(QWidget):
             QMessageBox.information(self, "완료",
                 f"작업현황 시트 채우기가 완료되었습니다.\n\n파일명: [{output_name}]")
         except Exception as e:
+            capture_exception(e, tab="tab2", step="fill_work_status",
+                              sheet=self.target_sheet, year=year, month=month)
             self.p_bar2.setValue(0)
             self.log(f"[탭2] ❌ 오류: {e}")
             QMessageBox.critical(self, "에러", str(e))
@@ -612,6 +623,11 @@ class Tab2Widget(QWidget):
 
     def _save_back_as_xls(self, src_xlsx: str, dst_xls: str):
         """편집된 xlsx를 COM으로 열어 원본 xls 경로에 덮어씀."""
+        if not _HAS_WIN32:
+            raise RuntimeError(
+                "이 PC에는 Excel(win32com)이 없어 .xls로 재저장할 수 없습니다. "
+                ".xlsx 형식으로 사용하세요."
+            )
         excel = wb = None
         try:
             pythoncom.CoInitialize()
@@ -668,8 +684,14 @@ class MainWindow(QWidget):
         self.setLayout(root)
 
     def log(self, msg: str):
+        # 화면 출력
         self.log_box.append(msg)
         self.log_box.verticalScrollBar().setValue(self.log_box.verticalScrollBar().maximum())
+        # 파일 기록 (휘발 방지) — 이모지/장식 제거 없이 그대로 정규화 로그에 남김
+        try:
+            _flog.info(msg)
+        except Exception:
+            pass
 
     def closeEvent(self, event):
         self.tab1.cleanup_temp_files()
@@ -677,6 +699,13 @@ class MainWindow(QWidget):
 
 
 def run():
+    # 런처를 거치지 않고 단독 실행되는 경우에도 로깅 보장
+    try:
+        setup_logging(component="gui")
+        install_excepthook()
+    except Exception:
+        pass
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     palette = QPalette()

@@ -11,6 +11,13 @@ import openpyxl
 from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.styles import PatternFill
 
+try:
+    from app_logging import get_logger
+    _log = get_logger("work_status")
+except Exception:
+    import logging
+    _log = logging.getLogger("work_status")
+
 _NO_FILL = PatternFill(fill_type=None)
 
 # ── 상수 ─────────────────────────────────────────────────────────
@@ -251,4 +258,8 @@ def fill_work_status(noim_file: str, output_file: str, sheet_name: str,
 
     wb.save(output_file)
     wb.close()
+    _log.info("작업현황 채우기 완료 | 시트=%s | %d-%02d | 데이터일수=%d | 동절기=%s",
+              sheet_name, year, month, len(day_data), is_winter)
+    if not day_data:
+        _log.warning("노임일보에서 읽은 출근 데이터가 없습니다 — 입력 파일/시트명을 확인하세요.")
     return output_file
