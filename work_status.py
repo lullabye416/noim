@@ -37,32 +37,52 @@ COL_SELYUN  = 7   # G 세륜기
 COL_DONG    = 8   # H 동절기
 COL_DESC    = 9   # I 작업사항
 
-# 직종 분류: (포함 키워드) → 카테고리 키
-CATEGORY_RULES = [
-    ('신호수',  'shin'),
-    ('안전자재', 'anjeon'),
-    ('세륜기',  'selyun'),
-    ('계륜기',  'selyun'),
-    ('동절기',  'dong'),
-]
-
-DESC_KW    = {'shin': '신호수', 'anjeon': '안전자재', 'selyun': '세륜기', 'dong': '동절기'}
+# 직종 분류: 카테고리 키 → 기본 포함 키워드 (탭2 UI "4. 작업내용 매핑 규칙"에서 재정의 가능)
+DEFAULT_CATEGORY_KEYWORDS = {'shin': '신호수', 'anjeon': '안전자재', 'selyun': '세륜기', 'dong': '동절기'}
 DESC_ORDER = ['shin', 'anjeon', 'selyun', 'dong']
+
+# 세륜기/계륜기는 현장에서 혼용되는 동의어라, 사용자가 세륜기 키워드를 바꿔도 항상 함께 매칭한다.
+_SELYUN_SYNONYM = '계륜기'
+
+
+def build_category_rules(category_keywords: dict = None) -> list:
+    """{category: keyword} → [(keyword, category), ...] (분류 우선순위 순서)."""
+    ck = category_keywords if category_keywords else DEFAULT_CATEGORY_KEYWORDS
+    rules = []
+    for cat in ('shin', 'anjeon'):
+        kw = (ck.get(cat) or '').strip()
+        if kw:
+            rules.append((kw, cat))
+    selyun_kw = (ck.get('selyun') or '').strip()
+    if selyun_kw:
+        rules.append((selyun_kw, 'selyun'))
+    rules.append((_SELYUN_SYNONYM, 'selyun'))
+    dong_kw = (ck.get('dong') or '').strip()
+    if dong_kw:
+        rules.append((dong_kw, 'dong'))
+    return rules
+
+
+def build_desc_kw(category_keywords: dict = None) -> dict:
+    """작업사항 열 문구 정렬에 쓰이는 {category: keyword}."""
+    ck = category_keywords if category_keywords else DEFAULT_CATEGORY_KEYWORDS
+    return {cat: (ck[cat] or '').strip() for cat in DESC_ORDER if (ck.get(cat) or '').strip()}
 
 
 # ── 노임일보 파싱 ─────────────────────────────────────────────────
 
-def _classify(work_desc: str) -> str:
-    for kw, cat in CATEGORY_RULES:
+def _classify(work_desc: str, category_rules: list) -> str:
+    for kw, cat in category_rules:
         if kw in work_desc:
             return cat
     return 'jik'
 
 
-def read_noim_ilbo(noim_file: str) -> dict:
+def read_noim_ilbo(noim_file: str, category_rules: list = None) -> dict:
     """
     {day: {'total','shin','anjeon','selyun','dong','jik','descs'}}
     """
+    category_rules = category_rules if category_rules is not None else build_category_rules()
     wb = openpyxl.load_workbook(noim_file, data_only=True)
     day_data = {}
 
@@ -90,7 +110,7 @@ def read_noim_ilbo(noim_file: str) -> dict:
             gongsu = float(today_val)
             total += gongsu
             work_desc = str(ws.cell(r, NOIM_WORKDESC_COL).value or '').strip()
-            counts[_classify(work_desc)] += gongsu
+            counts[_classify(work_desc, category_rules)] += gongsu
             if work_desc:
                 descs.add(work_desc)
 
@@ -103,11 +123,13 @@ def read_noim_ilbo(noim_file: str) -> dict:
 
 # ── 유틸 ─────────────────────────────────────────────────────────
 
-def _ordered_descs(descs: set, is_winter: bool) -> str:
+def _ordered_descs(descs: set, is_winter: bool, desc_kw: dict) -> str:
     order = DESC_ORDER if is_winter else [k for k in DESC_ORDER if k != 'dong']
     result = []
     for cat in order:
-        kw    = DESC_KW[cat]
+        kw = desc_kw.get(cat)
+        if not kw:
+            continue
         match = next((d for d in descs if kw in d), None)
         if match and match not in result:
             result.append(match)
@@ -169,11 +191,15 @@ def _delete_col_with_widths(ws, col_idx: int):
 # ── 메인 함수 ─────────────────────────────────────────────────────
 
 def fill_work_status(noim_file: str, output_file: str, sheet_name: str,
-                     year: int, month: int) -> str:
+                     year: int, month: int, category_keywords: dict = None) -> str:
     """
     output_file: 샘플을 복사한 수정 대상 파일 (호출 전 shutil.copy 필요).
+    category_keywords: {'shin','anjeon','selyun','dong': keyword} — 탭2 "4. 작업내용
+        매핑 규칙" UI에서 전달. 미지정 시 DEFAULT_CATEGORY_KEYWORDS 사용.
     """
-    day_data    = read_noim_ilbo(noim_file)
+    category_rules = build_category_rules(category_keywords)
+    desc_kw        = build_desc_kw(category_keywords)
+    day_data    = read_noim_ilbo(noim_file, category_rules)
     is_winter   = month in WINTER_MONTHS
     needed_days = calendar.monthrange(year, month)[1]
 
@@ -218,7 +244,7 @@ def fill_work_status(noim_file: str, output_file: str, sheet_name: str,
             ws.cell(r, COL_ANJEON).value = info['anjeon']
             ws.cell(r, COL_SELYUN).value = info['selyun']
             ws.cell(r, COL_DONG  ).value = info['dong']
-            ws.cell(r, COL_DESC  ).value = _ordered_descs(info['descs'], is_winter) or None
+            ws.cell(r, COL_DESC  ).value = _ordered_descs(info['descs'], is_winter, desc_kw) or None
         else:
             for c in [COL_TOTAL, COL_JIK, COL_SHIN, COL_ANJEON, COL_SELYUN, COL_DONG]:
                 ws.cell(r, c).value = 0

@@ -432,7 +432,7 @@ class Tab2Widget(QWidget):
         root.addWidget(g2)
 
         # 4. 작업내용 매핑 규칙
-        g4 = QGroupBox("4. 작업내용 매핑 규칙  (노임일보 생성 탭에 적용)")
+        g4 = QGroupBox("4. 작업내용 매핑 규칙  (노임일보 생성 탭 + 작업현황 분류에 적용)")
         l4 = QVBoxLayout(); l4.setSpacing(4)
 
         self.map_table = QTableWidget()
@@ -444,15 +444,19 @@ class Tab2Widget(QWidget):
         self.map_table.setFixedHeight(175)
         self.map_table.setStyleSheet("font-size: 11px;")
 
+        # (키워드, 치환값, 카테고리키) — 카테고리키는 work_status.py 분류 열(신호수/
+        # 안전자재/세륜기/동절기)과 1:1 대응. 탭2 실행 시 이 키워드로 분류 규칙을 재구성한다.
         _defaults = [
-            ("신호수",   "3번게이트 신호수"),
-            ("안전자재", "안전자재 정리"),
-            ("세륜기",   "세륜기 관리"),
-            ("동절기",   "동절기"),
+            ("신호수",   "3번게이트 신호수", "shin"),
+            ("안전자재", "안전자재 정리",    "anjeon"),
+            ("세륜기",   "세륜기 관리",      "selyun"),
+            ("동절기",   "동절기",           "dong"),
         ]
         self.map_table.setRowCount(len(_defaults) + 1)
-        for i, (kw, val) in enumerate(_defaults):
-            self.map_table.setItem(i, 0, QTableWidgetItem(kw))
+        for i, (kw, val, cat) in enumerate(_defaults):
+            kw_item = QTableWidgetItem(kw)
+            kw_item.setData(Qt.ItemDataRole.UserRole, cat)
+            self.map_table.setItem(i, 0, kw_item)
             self.map_table.setItem(i, 1, QTableWidgetItem(val))
 
         # else 행 — 키워드 열은 편집 불가
@@ -578,7 +582,8 @@ class Tab2Widget(QWidget):
             self.p_bar2.setValue(20)
 
             # 2. output 파일에 데이터 채우기
-            fill_work_status(self.noim_file, output_path, self.target_sheet, year, month)
+            fill_work_status(self.noim_file, output_path, self.target_sheet, year, month,
+                              category_keywords=self.get_category_keywords())
             self.p_bar2.setValue(100)
 
             self.log(f"[탭2] ✅ 완료 → {output_name}")
@@ -620,6 +625,19 @@ class Tab2Widget(QWidget):
         fallback_item = self.map_table.item(last, 1)
         fallback = fallback_item.text().strip() if fallback_item else '현장정리'
         return mapping, fallback
+
+    def get_category_keywords(self):
+        """탭2 실행() 호출 — work_status.py 분류 규칙에 쓰일 {category: keyword} 반환."""
+        result = {}
+        last = self.map_table.rowCount() - 1
+        for i in range(last):
+            kw_item = self.map_table.item(i, 0)
+            if not kw_item:
+                continue
+            cat = kw_item.data(Qt.ItemDataRole.UserRole)
+            if cat:
+                result[cat] = kw_item.text().strip()
+        return result
 
     def _save_back_as_xls(self, src_xlsx: str, dst_xls: str):
         """편집된 xlsx를 COM으로 열어 원본 xls 경로에 덮어씀."""
