@@ -1,4 +1,4 @@
-import sys, os, datetime
+import sys, os, json, datetime
 import pandas as pd
 try:
     import win32com.client as win32
@@ -373,6 +373,7 @@ class Tab2Widget(QWidget):
         self.target_xlsx  = ""   # .xls→.xlsx 변환 경로 (임시)
         self.target_sheet = ""   # 자동 감지된 작업현황 시트명
         self.temp_files   = []
+        self._loading     = False
         self._build_ui()
 
     # ── UI 구성 ───────────────────────────────────────────────────
@@ -446,6 +447,7 @@ class Tab2Widget(QWidget):
 
         # (키워드, 치환값, 카테고리키) — 카테고리키는 work_status.py 분류 열(신호수/
         # 안전자재/세륜기/동절기)과 1:1 대응. 탭2 실행 시 이 키워드로 분류 규칙을 재구성한다.
+        self._loading = True
         _defaults = [
             ("신호수",   "3번게이트 신호수", "shin"),
             ("안전자재", "안전자재 정리",    "anjeon"),
@@ -460,11 +462,8 @@ class Tab2Widget(QWidget):
             self.map_table.setItem(i, 1, QTableWidgetItem(val))
 
         # else 행 — 키워드 열은 편집 불가
-        _else_kw = QTableWidgetItem("(기타 — else)")
-        _else_kw.setFlags(_else_kw.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        _else_kw.setForeground(QColor("#999"))
-        self.map_table.setItem(len(_defaults), 0, _else_kw)
-        self.map_table.setItem(len(_defaults), 1, QTableWidgetItem("현장정리"))
+        self._set_else_row(len(_defaults), "현장정리")
+        self._loading = False
 
         l4.addWidget(self.map_table)
 
@@ -480,6 +479,9 @@ class Tab2Widget(QWidget):
 
         g4.setLayout(l4)
         root.addWidget(g4)
+
+        self.map_table.itemChanged.connect(self._save_mapping_config)
+        self._load_mapping_config()   # 저장된 설정이 있으면 기본값 위에 덮어씀
 
         # 실행 버튼
         self.btn_run2 = QPushButton("▶  작업현황 채우기 실행")
@@ -603,6 +605,7 @@ class Tab2Widget(QWidget):
         self.map_table.insertRow(last)
         self.map_table.setItem(last, 0, QTableWidgetItem(""))
         self.map_table.setItem(last, 1, QTableWidgetItem(""))
+        self._save_mapping_config()
 
     def _del_map_row(self):
         sel = self.map_table.currentRow()
@@ -610,6 +613,74 @@ class Tab2Widget(QWidget):
         if sel < 0 or sel >= last:             # else 행은 삭제 불가
             return
         self.map_table.removeRow(sel)
+        self._save_mapping_config()
+
+    def _set_else_row(self, row: int, fallback_value: str):
+        """else 행(키워드 열 편집 불가) 세팅 — 초기 생성/설정 로드 시 공용."""
+        _else_kw = QTableWidgetItem("(기타 — else)")
+        _else_kw.setFlags(_else_kw.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        _else_kw.setForeground(QColor("#999"))
+        self.map_table.setItem(row, 0, _else_kw)
+        self.map_table.setItem(row, 1, QTableWidgetItem(fallback_value))
+
+    # ── 매핑 설정 저장/로드 (config/work_desc_mapping.json) ─────────
+
+    def _mapping_config_path(self) -> str:
+        return os.path.join(_sub_dir("config"), "work_desc_mapping.json")
+
+    def _mapping_rows_for_save(self):
+        rows = []
+        last = self.map_table.rowCount() - 1
+        for i in range(last):
+            kw_item  = self.map_table.item(i, 0)
+            val_item = self.map_table.item(i, 1)
+            rows.append({
+                'keyword':  kw_item.text().strip()  if kw_item  else '',
+                'value':    val_item.text().strip() if val_item else '',
+                'category': kw_item.data(Qt.ItemDataRole.UserRole) if kw_item else None,
+            })
+        fallback_item = self.map_table.item(last, 1)
+        fallback = fallback_item.text().strip() if fallback_item else '현장정리'
+        return rows, fallback
+
+    def _save_mapping_config(self, *_args):
+        if self._loading:
+            return
+        rows, fallback = self._mapping_rows_for_save()
+        try:
+            with open(self._mapping_config_path(), 'w', encoding='utf-8') as f:
+                json.dump({'mapping': rows, 'fallback': fallback}, f,
+                          ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log(f"[탭2] ⚠ 매핑 설정 저장 실패: {e}")
+
+    def _load_mapping_config(self):
+        path = self._mapping_config_path()
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            rows     = data.get('mapping', [])
+            fallback = data.get('fallback', '현장정리')
+        except Exception as e:
+            self.log(f"[탭2] ⚠ 매핑 설정 로드 실패, 기본값 유지: {e}")
+            return
+
+        self._loading = True
+        try:
+            self.map_table.setRowCount(len(rows) + 1)
+            for i, entry in enumerate(rows):
+                kw_item = QTableWidgetItem(entry.get('keyword', ''))
+                cat = entry.get('category')
+                if cat:
+                    kw_item.setData(Qt.ItemDataRole.UserRole, cat)
+                self.map_table.setItem(i, 0, kw_item)
+                self.map_table.setItem(i, 1, QTableWidgetItem(entry.get('value', '')))
+            self._set_else_row(len(rows), fallback)
+        finally:
+            self._loading = False
+        self.log(f"[탭2] 저장된 작업내용 매핑 규칙 로드 완료 ({len(rows)}개)")
 
     def get_work_desc_map(self):
         """Tab 1 execute()에서 호출 — (mapping_list, fallback_str) 반환."""
