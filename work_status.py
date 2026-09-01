@@ -37,8 +37,12 @@ COL_SELYUN  = 7   # G 세륜기
 COL_DONG    = 8   # H 동절기
 COL_DESC    = 9   # I 작업사항
 
-# 직종 분류: 카테고리 키 → 기본 포함 키워드 (탭2 UI "4. 작업내용 매핑 규칙"에서 재정의 가능)
+# 직종 분류: 카테고리 키 → 기본 포함 키워드/표시값 (탭2 UI "4. 작업내용 매핑 규칙"에서 재정의 가능)
 DEFAULT_CATEGORY_KEYWORDS = {'shin': '신호수', 'anjeon': '안전자재', 'selyun': '세륜기', 'dong': '동절기'}
+DEFAULT_CATEGORY_VALUES = {
+    'shin': '3번게이트 신호수', 'anjeon': '안전자재 정리', 'selyun': '세륜기 관리', 'dong': '동절기',
+}
+DEFAULT_FALLBACK_VALUE = '현장정리'
 DESC_ORDER = ['shin', 'anjeon', 'selyun', 'dong']
 
 # 세륜기/계륜기는 현장에서 혼용되는 동의어라, 사용자가 세륜기 키워드를 바꿔도 항상 함께 매칭한다.
@@ -63,12 +67,6 @@ def build_category_rules(category_keywords: dict = None) -> list:
     return rules
 
 
-def build_desc_kw(category_keywords: dict = None) -> dict:
-    """작업사항 열 문구 정렬에 쓰이는 {category: keyword}."""
-    ck = category_keywords if category_keywords else DEFAULT_CATEGORY_KEYWORDS
-    return {cat: (ck[cat] or '').strip() for cat in DESC_ORDER if (ck.get(cat) or '').strip()}
-
-
 # ── 노임일보 파싱 ─────────────────────────────────────────────────
 
 def _classify(work_desc: str, category_rules: list) -> str:
@@ -80,7 +78,7 @@ def _classify(work_desc: str, category_rules: list) -> str:
 
 def read_noim_ilbo(noim_file: str, category_rules: list = None) -> dict:
     """
-    {day: {'total','shin','anjeon','selyun','dong','jik','descs'}}
+    {day: {'total','shin','anjeon','selyun','dong','jik'}}
     """
     category_rules = category_rules if category_rules is not None else build_category_rules()
     wb = openpyxl.load_workbook(noim_file, data_only=True)
@@ -93,7 +91,6 @@ def read_noim_ilbo(noim_file: str, category_rules: list = None) -> dict:
         ws  = wb[sheet_name]
 
         counts = {'shin': 0, 'anjeon': 0, 'selyun': 0, 'dong': 0, 'jik': 0}
-        descs  = set()
         total  = 0
 
         for r in range(NOIM_DATA_START, NOIM_DATA_START + 60):
@@ -111,11 +108,9 @@ def read_noim_ilbo(noim_file: str, category_rules: list = None) -> dict:
             total += gongsu
             work_desc = str(ws.cell(r, NOIM_WORKDESC_COL).value or '').strip()
             counts[_classify(work_desc, category_rules)] += gongsu
-            if work_desc:
-                descs.add(work_desc)
 
         if total > 0:
-            day_data[day] = {**counts, 'total': total, 'descs': descs}
+            day_data[day] = {**counts, 'total': total}
 
     wb.close()
     return day_data
@@ -123,19 +118,21 @@ def read_noim_ilbo(noim_file: str, category_rules: list = None) -> dict:
 
 # ── 유틸 ─────────────────────────────────────────────────────────
 
-def _ordered_descs(descs: set, is_winter: bool, desc_kw: dict) -> str:
+def _build_desc_line(info: dict, is_winter: bool, category_values: dict, fallback_value: str) -> str:
+    """공수가 잡힌 카테고리만, 현재 매핑 표의 '값'을 그대로 이어붙인다.
+    (노임일보 파일에 적힌 원문이 아니라 실행 시점의 매핑 값을 쓰므로,
+    탭1을 언제 돌렸는지와 무관하게 탭2 실행 시점 기준 값이 반영된다.)"""
     order = DESC_ORDER if is_winter else [k for k in DESC_ORDER if k != 'dong']
     result = []
     for cat in order:
-        kw = desc_kw.get(cat)
-        if not kw:
-            continue
-        match = next((d for d in descs if kw in d), None)
-        if match and match not in result:
-            result.append(match)
-    for d in sorted(descs):
-        if d not in result:
-            result.append(d)
+        if info.get(cat, 0) > 0:
+            val = (category_values.get(cat) or '').strip()
+            if val and val not in result:
+                result.append(val)
+    if info.get('jik', 0) > 0:
+        val = (fallback_value or '').strip()
+        if val and val not in result:
+            result.append(val)
     return ', '.join(result)
 
 
@@ -191,14 +188,19 @@ def _delete_col_with_widths(ws, col_idx: int):
 # ── 메인 함수 ─────────────────────────────────────────────────────
 
 def fill_work_status(noim_file: str, output_file: str, sheet_name: str,
-                     year: int, month: int, category_keywords: dict = None) -> str:
+                     year: int, month: int, category_keywords: dict = None,
+                     category_values: dict = None, fallback_value: str = None) -> str:
     """
     output_file: 샘플을 복사한 수정 대상 파일 (호출 전 shutil.copy 필요).
-    category_keywords: {'shin','anjeon','selyun','dong': keyword} — 탭2 "4. 작업내용
-        매핑 규칙" UI에서 전달. 미지정 시 DEFAULT_CATEGORY_KEYWORDS 사용.
+    category_keywords/category_values/fallback_value: 탭2 "4. 작업내용 매핑 규칙" UI에서
+        전달되는 {카테고리: 키워드}/{카테고리: 표시값}/기타행 값. 키워드는 분류(공수 카운트)에,
+        표시값은 작업사항 열 문구 렌더링에 쓰인다 — 후자는 노임일보 원문이 아니라 실행 시점의
+        매핑 표 값을 그대로 쓰므로 탭1 재실행 여부와 무관하게 항상 최신 값이 반영된다.
+        미지정 시 DEFAULT_CATEGORY_KEYWORDS/DEFAULT_CATEGORY_VALUES/DEFAULT_FALLBACK_VALUE 사용.
     """
     category_rules = build_category_rules(category_keywords)
-    desc_kw        = build_desc_kw(category_keywords)
+    display_values = category_values if category_values else DEFAULT_CATEGORY_VALUES
+    fallback_value = fallback_value if fallback_value else DEFAULT_FALLBACK_VALUE
     day_data    = read_noim_ilbo(noim_file, category_rules)
     is_winter   = month in WINTER_MONTHS
     needed_days = calendar.monthrange(year, month)[1]
@@ -244,7 +246,7 @@ def fill_work_status(noim_file: str, output_file: str, sheet_name: str,
             ws.cell(r, COL_ANJEON).value = info['anjeon']
             ws.cell(r, COL_SELYUN).value = info['selyun']
             ws.cell(r, COL_DONG  ).value = info['dong']
-            ws.cell(r, COL_DESC  ).value = _ordered_descs(info['descs'], is_winter, desc_kw) or None
+            ws.cell(r, COL_DESC  ).value = _build_desc_line(info, is_winter, display_values, fallback_value) or None
         else:
             for c in [COL_TOTAL, COL_JIK, COL_SHIN, COL_ANJEON, COL_SELYUN, COL_DONG]:
                 ws.cell(r, c).value = 0
