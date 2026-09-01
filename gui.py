@@ -584,8 +584,10 @@ class Tab2Widget(QWidget):
             self.p_bar2.setValue(20)
 
             # 2. output 파일에 데이터 채우기
+            _cat_kw, _cat_val, _fallback = self.get_category_config()
             fill_work_status(self.noim_file, output_path, self.target_sheet, year, month,
-                              category_keywords=self.get_category_keywords())
+                              category_keywords=_cat_kw, category_values=_cat_val,
+                              fallback_value=_fallback)
             self.p_bar2.setValue(100)
 
             self.log(f"[탭2] ✅ 완료 → {output_name}")
@@ -697,9 +699,10 @@ class Tab2Widget(QWidget):
         fallback = fallback_item.text().strip() if fallback_item else '현장정리'
         return mapping, fallback
 
-    def get_category_keywords(self):
-        """탭2 실행() 호출 — work_status.py 분류 규칙에 쓰일 {category: keyword} 반환."""
-        result = {}
+    def get_category_config(self):
+        """탭2 실행() 호출 — work_status.py에 쓰일 ({category: keyword}, {category: value}, fallback) 반환.
+        keyword는 분류(공수 카운트)에, value/fallback은 작업사항 열 문구 렌더링에 쓰인다."""
+        keywords, values = {}, {}
         last = self.map_table.rowCount() - 1
         for i in range(last):
             kw_item = self.map_table.item(i, 0)
@@ -707,8 +710,12 @@ class Tab2Widget(QWidget):
                 continue
             cat = kw_item.data(Qt.ItemDataRole.UserRole)
             if cat:
-                result[cat] = kw_item.text().strip()
-        return result
+                val_item = self.map_table.item(i, 1)
+                keywords[cat] = kw_item.text().strip()
+                values[cat]   = val_item.text().strip() if val_item else ''
+        fallback_item = self.map_table.item(last, 1)
+        fallback = fallback_item.text().strip() if fallback_item else '현장정리'
+        return keywords, values, fallback
 
     def _save_back_as_xls(self, src_xlsx: str, dst_xls: str):
         """편집된 xlsx를 COM으로 열어 원본 xls 경로에 덮어씀."""
