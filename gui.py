@@ -761,6 +761,12 @@ class MainWindow(QWidget):
         root.setSpacing(4)
         root.setContentsMargins(0, 0, 0, 0)
 
+        # 공용 로그창 — 탭 생성 시점에 로그를 남길 수 있으므로 탭보다 먼저 만든다.
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setFixedHeight(100)
+        self.log_box.setStyleSheet("font-size: 11px; background: #fafafa;")
+
         # 탭
         self.tabs = QTabWidget()
         self.tab1 = Tab1Widget(self.log)
@@ -769,18 +775,14 @@ class MainWindow(QWidget):
         self.tabs.addTab(self.tab1, "노임일보 생성")
         self.tabs.addTab(self.tab2, "작업현황 작성")
         root.addWidget(self.tabs)
-
-        # 공용 로그창
-        self.log_box = QTextEdit()
-        self.log_box.setReadOnly(True)
-        self.log_box.setFixedHeight(100)
-        self.log_box.setStyleSheet("font-size: 11px; background: #fafafa;")
         root.addWidget(self.log_box)
 
         self.setLayout(root)
 
     def log(self, msg: str):
-        # 화면 출력
+        # 화면 출력 (log_box 생성 전 호출돼도 안전하게 무시)
+        if not hasattr(self, 'log_box'):
+            return
         self.log_box.append(msg)
         self.log_box.verticalScrollBar().setValue(self.log_box.verticalScrollBar().maximum())
         # 파일 기록 (휘발 방지) — 이모지/장식 제거 없이 그대로 정규화 로그에 남김
